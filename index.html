@@ -245,8 +245,30 @@
                 </div>
             </div>
 
+            <!-- 채팅창 -->
+            <div id="chat-container" class="w-full md:w-80 lg:w-96 bg-gray-800 flex flex-col h-1/2 md:h-full">
+                <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-2 text-sm">
+                    <!-- 채팅 메시지 표시 영역 -->
+                </div>
+                <!-- 채팅 입력 -->
+                <div class="p-4 border-t border-gray-700">
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="chat-input" placeholder="메시지 입력..." class="flex-1 p-2 bg-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <!-- 파일 첨부 버튼 -->
+                        <button id="btn-attach-file" class="p-2 bg-gray-700 rounded-lg hover:bg-gray-600" title="파일 첨부">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.414a4 4 0 00-5.656-5.656l-6.415 6.415a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                        </button>
+                        <input type="file" id="file-input" class="hidden">
+                        <!-- 전송 버튼 -->
+                        <button id="btn-send-chat" class="p-2 bg-blue-600 rounded-lg hover:bg-blue-700">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <!-- 
-                *** 오류 수정 ***
+                *** 오류 수정 (이전 수정 내역) ***
                 - (line 183)에서 시작된 flex div가 닫히지 않았습니다.
                 - (line 104)에서 시작된 page-main div가 닫히지 않았습니다.
                 - 아래에 </div> 태그 2개를 추가하여 HTML 구조를 수정합니다.
@@ -332,7 +354,6 @@
             <button id="wb-save-pdf" class="px-3 py-2 text-sm bg-blue-600 rounded hover:bg-blue-700">PDF 저장</button>
             <button id="wb-save-all-pdf" class="px-3 py-2 text-sm bg-green-600 rounded hover:bg-green-700">모두 저장 (PDF)</button>
 
-Gub
             <div class="flex-grow border-t border-gray-600 md:border-t-0 md:border-l md:h-8 md:mx-2"></div>
             
             <!-- 종료 -->
@@ -367,6 +388,9 @@ Gub
         // (신규) 링크 참여용 변수
         let autoJoinId = null;
         let autoJoinPass = null;
+        
+        // *** (신규) 의도적인 Peer 파괴(destroy) 여부 플래그 ***
+        let isPeerDestroyedIntentionally = false;
 
         // --- 판서 도구 상태 변수 ---
         let wbCanvas;
@@ -577,6 +601,8 @@ Gub
 
             // 교사는 'hostPeerId'를 사용, 학생은 null (자동 생성)
             const peerIdToUse = isHost ? hostPeerId : null; 
+            
+            isPeerDestroyedIntentionally = false; // (수정) Peer 초기화 시 플래그 리셋
 
             peer = new Peer(peerIdToUse, {
                 // key: 'YOUR_PEERJS_API_KEY', // PeerJS 서버를 직접 운영하지 않는 경우 API 키가 필요할 수 있습니다.
@@ -694,7 +720,11 @@ Gub
                         message = `설정한 교사 ID '${hostPeerId}'는 이미 사용 중이거나 사용할 수 없습니다. 다른 ID로 다시 시도해주세요.`;
                         showModal("ID 생성 실패", message);
                         showPage('page-teacher-create'); // 교사 ID 설정 페이지로 되돌리기
+                        
+                        // *** (수정) 의도된 파괴임을 플래그 ***
+                        isPeerDestroyedIntentionally = true;
                         if (peer) peer.destroy(); // 실패한 peer 객체 파괴
+                        
                         return; // 학생용 로직을 타지 않도록 return
                     }
                 } 
@@ -704,7 +734,8 @@ Gub
                     message = `ID '${failedPeerId}'에 해당하는 교사를 찾을 수 없습니다. ID가 올바른지 확인해주세요.`;
                 } else if (err.type === 'disconnected' || err.type === 'network') {
                     message = "연결이 끊겼습니다. 페이지를 새로고침합니다.";
-                    setTimeout(() => window.location.reload(), 3000);
+                    // (수정) 재연결 로직이 있으므로 자동 새로고침은 제거
+                    // setTimeout(() => window.location.reload(), 3000);
                 }
                 showModal("연결 오류", message);
                 if (!isHost) showPage('page-student-join'); // 학생만 되돌리기
@@ -712,6 +743,14 @@ Gub
             
             peer.on('disconnected', () => {
                 console.log("Peer 연결 끊김");
+
+                // *** (수정) 의도적으로 연결을 끊은 경우(ID 중복, 종료 버튼 등) 재연결 시도 안함 ***
+                if (isPeerDestroyedIntentionally) {
+                    console.log("의도된 연결 종료. 재연결 안 함.");
+                    isPeerDestroyedIntentionally = false; // 플래그 초기화
+                    return;
+                }
+
                 showModal("연결 끊김", "서버와의 연결이 끊겼습니다. 재연결을 시도합니다.");
                 peer.reconnect();
             });
@@ -800,7 +839,11 @@ Gub
                     if (!isHost) {
                         console.log('호스트 인증 실패');
                         showModal("인증 실패", "강의 비밀번호가 올바르지 않습니다.");
+                        
+                        // *** (수정) 의도된 파괴임을 플래그 ***
+                        isPeerDestroyedIntentionally = true; 
                         peer.destroy();
+                        
                         showPage('page-student-join');
                     }
                     break;
@@ -1181,6 +1224,8 @@ Gub
         const btnEndCall = document.getElementById('btn-end-call');
         if (btnEndCall) {
             btnEndCall.addEventListener('click', () => {
+                // *** (수정) 의도된 파괴임을 플래그 ***
+                isPeerDestroyedIntentionally = true; 
                 if (peer) {
                     peer.destroy(); // 모든 연결 종료
                 }
